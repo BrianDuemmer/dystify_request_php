@@ -31,7 +31,7 @@ tr:nth-child(even) {
 				$("#eval_sql").click(function()
 				{
 					var sql = $("#sql_entry").val();
-					$.post( "dbPostExec.php",
+					$.post( "dbUtil.php",
 							{"sql": sql},
 							function(result) //... and populate the results into a table
 							{
