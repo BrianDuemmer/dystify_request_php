@@ -30,12 +30,15 @@ tr:nth-child(even) {
 				// on clicking the button, POST down the sql to the database...
 				$("#eval_sql").click(function()
 				{
-					var sql = $("#sql_entry").val();
+					var sqla = $("#sql_entry").val();
 					$.post( "dbUtil.php",
-							{"sql": sql},
+							{
+						"target_id": "db",
+						"data": { "sql" : sqla}
+							},
 							function(result) //... and populate the results into a table
 							{
-// 								alert(result);
+								console.log(result);
 								rs = JSON.parse(result);
 								
 								var tblDat = "<tr>";

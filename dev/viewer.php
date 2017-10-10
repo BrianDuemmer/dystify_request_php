@@ -18,15 +18,42 @@
 		var $birthday;
 		var $lastBdayWithdraw;
 		var $songOnHold;
+		var $userIDHash;
 		
-		/** fetch data from database based on userID */
-		function __construct($uid) {
-			$this->userID = $uid;
-			$this->getByUserID($uid);
+		function __construct() {}
+		
+		/** initializes using a user ID, gets other stuff from the database */
+		static function withUIDHash($userIDHash) {
+			$impl = new Viewer();
+			$impl->getByUserIDHash($userIDHash);
+			return $impl;
 		}
 		
-		/** Empty constructor, for manually initialization */
-		function __construct() {}
+		
+		/** Creates a new user entry by querying the YouTube API */
+		static function fromYT($youtube) 
+		{
+			try {
+				$currChannel = $youtube->channels->listChannels('snippet', array('mine'=>'true'));
+				
+				// get the channel info
+				$userID = $currChannel['items']['0']['id'];
+				$username = $currChannel['items']['0']['snippet']['title'];
+				$userIDHash = hash('sha256', $userID);
+				
+				// try to pull an existing user with this info, or make a new one
+				$impl = Viewer::withUIDHash($userIDHash);
+				$impl->userID = $userID;
+				$impl->username = $username;
+				$impl->userIDHash = $userIDHash;
+				
+				return $impl;
+			} catch(Exception $e) { // there was some issue with getting YT info
+				return NULL;
+			}
+			
+		}
+
 		
 		
 		function makeFromJson($vRaw) {
@@ -49,28 +76,33 @@
 			$this->songOnHold = $vRaw->songOnHold;
 		}
 		
-		
-		function checkUserExists($uid) {
-			$psChk = db_prepareStatement('SELECT 1 FROM viewers WHERE user_id=?');
-			$psChk->bind_param('s', $this->userID);
-			$psChk->bind_result($resChk);
-			$psChk->fetch();
-			
-			return $resChk;
+		/** Returns true if the user exists in the database, false if they don't, and null if $uidh is null */
+		static function checkUserExists($uidh) {
+			if(isset($uidh)) {
+				$ps = db_prepareStatement('SELECT 1 FROM viewers WHERE user_id_hash=?');
+				$ps->bind_param('s', $uidh);
+				$ps->execute();
+				$ps->bind_results($ret);
+				$ps->fetch();
+				
+				return isset($ret);
+			}
 		}
 		
 		
 		
-		function getByUserID($uid) {
-			$this->userID = $uid;
-			
+		
+		
+		function getByUserIDHash($uidh) {		
 			// first, make sure they exist in the database
-			if(!$resChk) { // record doesn't exist
+			if(!Viewer::checkUserExists($uidh)) { // record doesn't exist, just leave
 				$this->hdlUserNotFound();
+				return;
 			}
 			
 			// get everything (except user id of course) from the database given user id
-			$sqlSel = 'SELECT (' .
+			$sqlSel = 'SELECT ' .
+					'user_id, ' .
 					'username, ' .
 					'rupees, ' .
 					'favorite_song, ' .
@@ -83,16 +115,16 @@
 					'static_rank, ' .
 					'birthday, ' .
 					'last_birthday_withdraw, ' .
-					'song_on_hold) ' .
-					'FROM viewers WHERE user_id=? LIMIT 1';
+					'song_on_hold ' .
+					'user_id_hash ' .
+					'FROM viewers WHERE user_id_hash=? LIMIT 1';
 			
-			
-			$ps = db_prepareStatement($sqlSel);
-			$ps->bind_param('s', $this->userID);
+			$ps = db_prepareStatement($sqlSel);	
+			$ps->bind_param('s', $uidh);
 			$ps->execute();
 			
 			// bind the results to variables
-			$ps->bind_result($this->username,
+			$ps->bind_result($this->userID,
 					$this->username,
 					$this->rupees,
 					$this->favSong,
@@ -104,7 +136,9 @@
 					$this->watchtimeRank,
 					$this->staticRank,
 					$this->birthday,
-					$this->songOnHold);
+					$this->lastBdayWithdraw,
+					$this->songOnHold,
+					$this->userIDHash);
 			
 			$ps->fetch();
 		}
@@ -116,7 +150,10 @@
 		 * Runs when a userID isn't found in the database.
 		 * TODO implement this
 		 */
-		function hdlUserNotFound() {}
+		function hdlUserNotFound() {
+			$this->userID = null;
+		}
+		
 		
 		
 		/**
@@ -137,24 +174,26 @@
 					'static_rank, ' .
 					'birthday, ' .
 					'last_birthday_withdraw, ' .
-					'song_on_hold) ' .
-					'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);';
+					'song_on_hold ' . 
+					'user_id_hash) ' .
+					'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);';
 			$ps = db_prepareStatement($sqlSel);
-			$ps->bind_param('ssisiidiisssss',
-					$username,
-					$user_id,
-					$rupees,
-					$favorite_song,
-					$is_admin,
-					$is_blacklisted,
-					$rupee_discount,
-					$free_requests,
-					$login_bonus_count,
-					$watchtime_rank,
-					$static_rank,
-					$birthday,
-					$last_birthday_withdraw,
-					$song_on_hold);
+			$ps->bind_param('ssisiidiissssss',
+					$this->username,
+					$this->userID,
+					$this->rupees,
+					$this->favSong,
+					$this->isAdmin,
+					$this->isBlacklisted,
+					$this->rupeeDiscount,
+					$this->freeRequests,
+					$this->loginBonusCount,
+					$this->watchtimeRank,
+					$this->staticRank,
+					$this->birthday,
+					$this->lastBdayWithdraw,
+					$this->songOnHold,
+					$this->userIDHash);
 			$ps->execute();
 		}
 	}
@@ -163,11 +202,11 @@
 	
 	if($_SERVER['REQUEST_METHOD'] == 'POST' && $_POST['target_id'] == 'viewer') {
 		$op = $_POST['target_op'];
-		$data = $_POST['data'];
+		$data = json_decode($_POST['data']);
 		
 		if($op == 'get_by_uid') { // JSON dump the viewer at that ID
-			$vwGet = new Viewer($data->userID);
-			echo json_encode($vw, JSON_NUMERIC_CHECK | JSON_FORCE_OBJECT);
+			$vwGet = Viewer::withUID($data->userID);
+			echo json_encode($vwGet, JSON_NUMERIC_CHECK | JSON_FORCE_OBJECT);
 			
 		} elseif ($op == 'write_to_db') { // build a new viewer from the POSTed data, write it to the database
 			// Create from data
