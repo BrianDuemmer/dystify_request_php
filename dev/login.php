@@ -1,16 +1,57 @@
 <?php	
-	require_once $_SERVER['DOCUMENT_ROOT'] . '/kkdystrack/php/dbUtils.php';
 	require_once $_SERVER['DOCUMENT_ROOT'] . '/kkdystrack/php/viewer.php';
 	
-	session_start();
-	$user_id_hash = $_COOKIE['user_id_hash'];
-	
-	// Attempt to access the viewer data based on this info
-	$viewerExists = Viewer::checkUserExists($user_id_hash);
-	if($viewerExists) { // if they're cookie matches a database entry, they're good to go
-		$viewer = Viewer::withUIDHash($user_id_hash);
-		$_SESSION['viewer'] = $viewer;
-	} else { // either the cookie is expired, or their record's don't exist, so they need to auth
-		
+	/** 
+	 * something along the lines of:
+	 * $USER, $RUPEES rupees $pfp <a>Sign out...</a>
+	 * */
+	function formatLoggedInBox() {
+		$vw = Viewer::withSessionID($_SESSION['session_id']);
+		echo $vw->username .', '. $vw->rupees .' rupees <img src="' .
+			$vw->pfpAddress . 
+			'" alt="pfp" style="width:48px;height:48px;"></img> ' . 
+			'<a href="' .
+			'https://' . $_SERVER['HTTP_HOST'] . '/kkdystrack/php/logout.php' .
+			'" >Sign out...</a>';
 	}
+	
+	
+	
+	/**
+	 * something along the lines of:
+	 * <a>Sign in with YouTube</a> to request songs
+	 * */
+	function formatLoggedOutBox() {
+		echo '<a href="' . 
+				'https://' . $_SERVER['HTTP_HOST'] . '/kkdystrack/php/login_callback.php" >' .
+				'Sign in with YouTube</a> to request songs!';
+	}
+	
+	
+	
+	
+	session_start(); 
+	
+	// Session's already loaded
+	if(isset($_SESSION['session_id'])) {
+		formatLoggedInBox();
+		
+	} // session's not loaded yet
+	else {
+		$id = $_COOKIE['session_id'];
+		$vw = Viewer::withSessionID($id);
+		$viewerExists = $vw->userID && $vw->userID != '';
+		
+		if($viewerExists) { // cookie is good, so we can load the session from there
+			$_SESSION['session_id'] = $user_id_hash;
+			$_SESSION['user_id'] = $vw->userID;
+			formatLoggedInBox();
+			
+		} // not logged in, prompt for login
+		else {
+			formatLoggedOutBox();
+		}
+	}
+	
+	// echo '<br/><pre>'; print_r($_SESSION); echo '</pre>';
 ?>

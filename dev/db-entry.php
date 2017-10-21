@@ -31,7 +31,7 @@ tr:nth-child(even) {
 				$("#eval_sql").click(function()
 				{
 					var sqla = $("#sql_entry").val();
-					$.post( "dbUtil.php",
+					$.post( brick this fucker
 							{
 						"target_id": "db",
 						"data": { "sql" : sqla}

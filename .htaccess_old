@@ -1,0 +1,7 @@
+ErrorDocument 404 http://www.dystify.com/index.html
+ErrorDocument 500 /500.shtml
+
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteCond %{REQUEST_FILENAME}.html -f
+RewriteRule ^(.+)$ $1.html [L,QSA]Options -Indexes

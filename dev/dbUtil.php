@@ -1,5 +1,5 @@
 <?php
-require_once $_SERVER ['DOCUMENT_ROOT'] . '/dev/GLOBALS.php';
+require_once $_SERVER ['DOCUMENT_ROOT'] . '/kkdystrack/php/GLOBALS.php';
 
 // connection to the database
 $connection;
@@ -13,6 +13,7 @@ if ($_SERVER ["REQUEST_METHOD"] == "POST" && $_POST ['target_id'] == 'db') {
 
 /**
  * will make sure we are connected, a la singleton
+ * @return mysqli
  */
 function db_verifyConnected() {
 	if (! isset ( $GLOBALS ['connection'] )) {
@@ -23,7 +24,7 @@ function db_verifyConnected() {
 		
 		// connect and select table
 		$db = mysqli_connect ( $dbHost, $dbUser, $dbPass, $dbDatabase ) or die ( 'failed to connect to database' );
-		
+		$db->set_charset('utf8');
 		if (isset ( $db )) {
 			mysqli_select_db ( $db, $dbDatabase );
 		}
@@ -45,37 +46,43 @@ function db_verifyConnected() {
  *
  * @return the resultset from the statement
  */
-function db_execRaw($dbStatement) {
+function db_execRaw($sql) {
 	$db = db_verifyConnected ();
-// 	echo var_dump($db).'\n';
-// 	echo var_dump($dbStatement).'\n';
-	
-	$result = mysqli_query ( $db, $dbStatement );
-	
+	$result = mysqli_query ( $db, $sql );
+	if($result) {
+		return db_rstojson($result);
+	}
+}
+
+
+
+
+
+
+
+function db_rstojson(mysqli_result $result) 
+{
 	// $jsonRes->cols[0] = "";
 	$jsonRes = new \stdClass ();
-	$jsonRes->data = [ ];
+	$jsonRes->data = [];
 	$jsonRes->cols = [ ];
 	
 	if ($result != null) {
 		// convert to json
 		if ($result->num_rows > 0) {
-			
 			$i = 0;
 			while ( $row = $result->fetch_assoc () ) {
-				$jsonRes->data [$i] = $row;
-				$i ++;
+				array_push($jsonRes->data, $row);
 			}
 		}
-		
+	
 		// get column names
 		foreach ( $result->fetch_fields () as $col ) {
 			$jsonRes->cols [] = $col->name;
 		}
 	} else {
-		//echo 'foo '.mysqli_error($db);
+		echo "null result<br/>";
 	}
-	
 	return json_encode ( $jsonRes );
 }
 
@@ -87,7 +94,9 @@ function db_execRaw($dbStatement) {
 
 
 
-
+/**
+ * @return mysqli_stmt
+ */
 function db_prepareStatement($sql) {
 	$db = db_verifyConnected ();
 	$ps = mysqli_prepare ( $db, $sql );
