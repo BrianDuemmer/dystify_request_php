@@ -29,3 +29,12 @@
 // 			verify_user_registered($u->user_id);
 // 		}
 	}
+	
+	
+	
+	
+	
+	function defaultVal($test, $default) 
+	{
+	    return $test ? $test : $default;
+	}
