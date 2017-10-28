@@ -1,5 +1,5 @@
 <?php	
-	require_once $_SERVER['DOCUMENT_ROOT'] . '/kkdystrack/php/viewer.php';
+	require_once $_SERVER['DOCUMENT_ROOT'] . '/kkdystrack/php/inc/viewer.php';
 	
 	/** 
 	 * something along the lines of:

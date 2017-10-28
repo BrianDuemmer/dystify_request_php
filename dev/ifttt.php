@@ -1,8 +1,8 @@
 <?php
-	require_once $_SERVER['DOCUMENT_ROOT'] . '/kkdystrack/php/GLOBALS.php';
-	require_once $_SERVER['DOCUMENT_ROOT'] . '/kkdystrack/php/dbUtil.php';
-	require_once $_SERVER['DOCUMENT_ROOT'] . '/kkdystrack/php/viewer.php';
-	require_once $_SERVER['DOCUMENT_ROOT'] . '/kkdystrack/php/util.php';
+	require_once $_SERVER['DOCUMENT_ROOT'] . '/kkdystrack/php/inc/GLOBALS.php';
+	require_once $_SERVER['DOCUMENT_ROOT'] . '/kkdystrack/php/inc/dbUtil.php';
+	require_once $_SERVER['DOCUMENT_ROOT'] . '/kkdystrack/php/inc/viewer.php';
+	require_once $_SERVER['DOCUMENT_ROOT'] . '/kkdystrack/php/inc/util.php';
 	
 	function addToIFTTTLog($data, $isErr) {
 		$tbl = $isErr ? 'ifttt_failed' : 'ifttt_log';

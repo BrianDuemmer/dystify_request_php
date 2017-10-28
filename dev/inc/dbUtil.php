@@ -1,5 +1,6 @@
 <?php
-require_once $_SERVER ['DOCUMENT_ROOT'] . '/kkdystrack/php/GLOBALS.php';
+//require_once $_SERVER ['DOCUMENT_ROOT'] . '/kkdystrack/php/inc/GLOBALS.php';
+require_once "GLOBALS.php";
 
 // connection to the database
 $connection;

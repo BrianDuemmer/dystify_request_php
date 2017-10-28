@@ -1,5 +1,5 @@
 <?php
-	require_once $_SERVER['DOCUMENT_ROOT'] . '/kkdystrack/php/dbUtil.php';
+	require_once $_SERVER['DOCUMENT_ROOT'] . '/kkdystrack/php/inc/dbUtil.php';
 	
 	class Viewer{
 		

@@ -1,7 +1,7 @@
 <?php // authenticates the user, and gets their YT creds
 
-	require_once $_SERVER['DOCUMENT_ROOT'] . '/kkdystrack/php/GLOBALS.php';
-	require_once $_SERVER['DOCUMENT_ROOT'] . '/kkdystrack/php/viewer.php';
+	require_once $_SERVER['DOCUMENT_ROOT'] . '/kkdystrack/php/inc/GLOBALS.php';
+	require_once $_SERVER['DOCUMENT_ROOT'] . '/kkdystrack/php/inc/viewer.php';
 	require_once $_SERVER['DOCUMENT_ROOT'] . '/ext-api/google-api-php-client-2.2.0/vendor/autoload.php';
 	require_once $_SERVER['DOCUMENT_ROOT'] . '/ext-api/google-api-php-client-2.2.0/vendor/google/apiclient-services/src/Google/Service/YouTube.php';
 	

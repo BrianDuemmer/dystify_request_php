@@ -1,5 +1,5 @@
 <?php
-	require_once $_SERVER['DOCUMENT_ROOT'] . '/kkdystrack/php/dbUtil.php';
+	require_once $_SERVER['DOCUMENT_ROOT'] . '/kkdystrack/php/inc/dbUtil.php';
 	
 	if($_SERVER['REQUEST_METHOD'] == 'POST') {
 		// get the params, set to defaults if not specified

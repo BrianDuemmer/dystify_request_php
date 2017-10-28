@@ -2,7 +2,7 @@
 DELIMITER $$
 
 DROP FUNCTION IF EXISTS F_CALC_COST$$
-CREATE FUNCTION F_CALC_COST(m_song_id VARCHAR(256), m_user_id VARCHAR(256), m_in_queue_override BOOLEAN) RETURNS DOUBLE
+CREATE FUNCTION F_CALC_COST(m_song_id VARCHAR(255), m_user_id VARCHAR(255), m_in_queue_override BOOLEAN) RETURNS DOUBLE
 	NOT DETERMINISTIC
 BEGIN
 	DECLARE m_cost DOUBLE;
@@ -51,6 +51,188 @@ BEGIN
 	RETURN m_cost;
 END
 
+
+
+
+
+
+/* new cost/cooldown function
+* First, finds all of the songs aliased to this one, then for each it
+* checks for the proper override conditions, pulling the most specific set
+* Then it selects all the songs from recent history, and depending on how 
+* closely they match (song, ost, franchise, etc.) a certain value of points, 
+* determined by the override, gets added to a total sum, which can later be 
+* converted to cost
+*/
+DELIMITER $$
+
+DROP PROCEDURE IF EXISTS P_CALC_PTS$$
+CREATE PROCEDURE P_CALC_PTS
+(
+	IN m_song_id VARCHAR(255),
+	OUT m_pts DOUBLE
+)
+BEGIN
+	DECLARE c_done INTEGER DEFAULT 0;
+	DECLARE m_curr_song VARCHAR(255);
+	
+	-- select all of the songs aliased to this one (including this song itself) into a cursor to iterate through
+	DECLARE alias_songs CURSOR FOR
+		SELECT  s.song_id AS aliased_song_id 
+		FROM 
+			song_alias s INNER JOIN song_alias a ON s.alias_name=a.alias_name
+		WHERE
+			a.song_id = m_song_id
+		UNION DISTINCT SELECT m_song_id;
+			
+	DECLARE CONTINUE HANDLER FOR NOT FOUND SET c_done = 1;
+	OPEN alias_songs;
+	
+	-- append the points
+	SELECT 
+		o.song_pts, o.ost_pts, o.franchise_pts, o.time_checked
+	INTO
+		@song_pts, @ost_pts, @franchise_pts, @time_checked
+	FROM
+		overrides o
+	WHERE
+		m_song_id LIKE CONCAT(o.override_id, '%')
+	ORDER BY CHAR_LENGTH(o.override_id) DESC
+	LIMIT 1;
+	
+	SET m_pts = 0;
+	
+	IF EXISTS(SELECT(song_id) FROM playlist WHERE song_id=m_song_id) THEN -- Also only run is the song id is actually in the playlist
+	
+		-- loop through each hit
+		l_calc_pts: LOOP
+			FETCH alias_songs INTO m_curr_song;
+			IF c_done=1 THEN 
+				LEAVE l_calc_pts;
+			END IF;
+			
+			SET m_pts = m_pts +
+				(SELECT 
+					COALESCE(
+						SUM(
+							F_CALC_PTS_CORE(song_id, m_curr_song, @song_pts, @ost_pts, @franchise_pts) *
+							((@time_checked - (UNIX_TIMESTAMP()-UNIX_TIMESTAMP(time_played))) / @time_checked)
+							),
+						0) AS points
+				FROM play_history WHERE @time_checked > UNIX_TIMESTAMP()-UNIX_TIMESTAMP(time_played));
+				
+		END LOOP l_calc_pts;
+	ELSE SET m_pts = -2; END IF;
+END
+
+		
+			
+	
+	
+-- Calculates how closely 2 songs match, in the form of an integer match level. Then applies a point cost to the match based on the match level
+-- 0: no match; 1: identical song; 2: diff song, same OST; 3: diff OST, same franchise
+DELIMITER $$
+
+DROP FUNCTION IF EXISTS F_CALC_PTS_CORE$$
+CREATE FUNCTION F_CALC_PTS_CORE
+(
+	m_song_1 VARCHAR(255), 
+	m_song_2 VARCHAR(255),
+	m_lvl_1_pts DOUBLE,
+	m_lvl_2_pts DOUBLE,
+	m_lvl_3_pts DOUBLE
+) RETURNS DOUBLE
+	DETERMINISTIC
+BEGIN
+	DECLARE m_depth_1 INTEGER;
+	DECLARE m_depth_2 INTEGER;
+	DECLARE m_match_lvl INTEGER;
+	DECLARE m_pts DOUBLE;
+	
+	SET m_depth_1 = CHAR_LENGTH(m_song_1) - CHAR_LENGTH(REPLACE(m_song_1, "\\", ""));
+	SET m_depth_2 = CHAR_LENGTH(m_song_2) - CHAR_LENGTH(REPLACE(m_song_2, "\\", ""));
+	
+	SET m_match_lvl = 
+		(SELECT IF(m_song_1=m_song_2, 1,
+			IF(SUBSTRING_INDEX(m_song_1, "\\", m_depth_1) = SUBSTRING_INDEX(m_song_2, "\\", m_depth_2), 2,
+				IF(SUBSTRING_INDEX(m_song_1, "\\", m_depth_1-1) = SUBSTRING_INDEX(m_song_2, "\\", m_depth_2-1), 3,
+					0)
+				)
+			)
+		);
+	
+	CASE m_match_lvl
+		WHEN 1 THEN SET m_pts = m_lvl_1_pts;
+		WHEN 2 THEN SET m_pts = m_lvl_2_pts;
+		WHEN 3 THEN SET m_pts = m_lvl_3_pts;
+		ELSE SET m_pts = 0;
+	END CASE;
+		
+	RETURN m_pts;
+END
+
+
+
+
+-- internally fetches a song's points (or recalculates them) and converts to rupee cost / cooldown
+DELIMITER $$
+
+DROP PROCEDURE IF EXISTS P_CALC_COST
+CREATE PROCEDURE P_CALC_COST
+(
+	IN m_song_id VARCHAR(255),
+	IN m_user_id VARCHAR(30),
+	IN m_recalc_pts BOOLEAN,
+	OUT m_cost DOUBLE,
+	OUT m_pts DOUBLE
+)
+BEGIN
+	IF m_recalc_pts THEN
+		CALL P_CALC_PTS(m_song_id, @pts);
+	ELSE
+		SET @pts = (SELECT song_points FROM playlist WHERE song_id=m_song_id LIMIT 1);
+	END IF;
+	SET m_pts = @pts;
+END
+
+
+
+
+
+-- does a simple read per second test on the parameter table
+DELIMITER $$
+
+DROP PROCEDURE IF EXISTS P_BENCHMARK_PARAM_READ$$
+CREATE PROCEDURE P_BENCHMARK_PARAM_READ
+(
+	IN m_key VARCHAR(100),
+	IN m_is_dbl BOOLEAN,
+	IN m_num INTEGER,
+	OUT m_seconds INTEGER,
+	OUT m_per_sec DOUBLE
+)
+BEGIN
+	DECLARE i INTEGER DEFAULT 0;
+	DECLARE m_start;
+	DECLARE m_end;
+	SET m_start = UNIX_TIMESTAMP();
+	
+	IF m_is_dbl THEN
+		WHILE i<m_num DO
+			F_READ_NUM_PARAM(m_key, 0);
+			SET i=i+1;
+		END WHILE;
+	ELSE 
+		WHILE i<m_num DO
+			F_READ_STR_PARAM(m_key, "foo");
+			SET i=i+1;
+		END WHILE;
+	END IF;
+	
+	SET m_seconds = UNIX_TIMESTAMP() - m_start;
+	SET m_per_sec = m_num / m_seconds;
+END
+	
 
 
 
@@ -123,7 +305,7 @@ DROP PROCEDURE IF EXISTS P_ADD_SONG$$
 CREATE PROCEDURE P_ADD_SONG
 (
 	IN m_user_id VARCHAR(30),
-	IN m_song_id VARCHAR(256),
+	IN m_song_id VARCHAR(255),
 	IN m_queue_id VARCHAR(100),
 	OUT m_cost DOUBLE,
 	OUT m_eta DOUBLE
@@ -188,7 +370,7 @@ BEGIN
 	"CREATE TABLE `queue_", m_queue_id, "` (
 		`user_id` varchar(30) COLLATE utf8_unicode_ci NOT NULL,
 		`time_requested` datetime NOT NULL,
-		`song_id` varchar(256) COLLATE utf8_unicode_ci NOT NULL,
+		`song_id` varchar(255) COLLATE utf8_unicode_ci NOT NULL,
 		`list_order` int(11) NOT NULL,
 		`id` int(11) NOT NULL AUTO_INCREMENT PRIMARY KEY
 	) ENGINE=MyISAM AUTO_INCREMENT=1 DEFAULT CHARSET=utf8 COLLATE=utf8_unicode_ci"
@@ -345,7 +527,7 @@ END
 DELIMITER $$
 
 DROP FUNCTION IF EXISTS F_GET_SONG_TIMES_PLAYED$$
-CREATE FUNCTION F_GET_SONG_TIMES_PLAYED(m_song_id VARCHAR(256), m_newerThan DATETIME) RETURNS INTEGER
+CREATE FUNCTION F_GET_SONG_TIMES_PLAYED(m_song_id VARCHAR(255), m_newerThan DATETIME) RETURNS INTEGER
     DETERMINISTIC
 BEGIN
     DECLARE m_times_played INTEGER;
@@ -363,7 +545,7 @@ END
 DELIMITER $$
 
 DROP FUNCTION IF EXISTS F_GET_SONG_LAST_PLAY$$
-CREATE FUNCTION F_GET_SONG_LAST_PLAY(m_song_id VARCHAR(256)) RETURNS DATETIME
+CREATE FUNCTION F_GET_SONG_LAST_PLAY(m_song_id VARCHAR(255)) RETURNS DATETIME
     DETERMINISTIC
 BEGIN
     DECLARE m_last_play DATETIME;
@@ -397,7 +579,7 @@ CREATE PROCEDURE P_ADD_RATING
 	IN m_rating DOUBLE
 ) 
 BEGIN
-    DECLARE m_song_id VARCHAR(256);
+    DECLARE m_song_id VARCHAR(255);
 	SET m_song_id = F_READ_STR_PARAM('now_playing', '');
 	IF(m_song_id != '') THEN
 		INSERT INTO ratings (song_id, user_id, rating_pct) 

@@ -1,5 +1,5 @@
 <?php
-	require_once $_SERVER['DOCUMENT_ROOT'] . '/kkdystrack/php/dbUtil.php';
+	require_once $_SERVER['DOCUMENT_ROOT'] . '/kkdystrack/php/inc/dbUtil.php';
 	
 	$counts = json_decode(db_execRaw(
 			"SELECT COUNT(*) AS t, 

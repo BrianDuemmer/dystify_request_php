@@ -1,6 +1,6 @@
 <?php
-	require_once $_SERVER['DOCUMENT_ROOT'] . '/kkdystrack/php/dbUtil.php';
-	require_once $_SERVER['DOCUMENT_ROOT'] . '/kkdystrack/php/util.php';
+	require_once $_SERVER['DOCUMENT_ROOT'] . '/kkdystrack/php/inc/dbUtil.php';
+	require_once $_SERVER['DOCUMENT_ROOT'] . '/kkdystrack/php/inc/util.php';
 	
 	session_start();
 	
