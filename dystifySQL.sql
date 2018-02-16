@@ -1,61 +1,3 @@
--- calculates the cost of the song
-DELIMITER $$
-
-DROP FUNCTION IF EXISTS F_CALC_COST$$
-CREATE FUNCTION F_CALC_COST(m_song_id VARCHAR(255), m_user_id VARCHAR(255), m_in_queue_override BOOLEAN) RETURNS DOUBLE
-	NOT DETERMINISTIC
-BEGIN
-	DECLARE m_cost DOUBLE;
-	DECLARE m_base_cost DOUBLE;
-	DECLARE m_cooldown INTEGER;
-	DECLARE m_max_cost DOUBLE;
-	DECLARE m_last_play DATETIME;
-	DECLARE m_cost_drop_day DOUBLE;
-	DECLARE m_user_discount DOUBLE;
-	
-	SET m_cost = -4; -- -1 for on cooldown, -2 for in queue already, -3 for song not found, -4 for unknown
-	
-	IF(m_in_queue_override || NOT EXISTS(SELECT (1) FROM queue_main WHERE song_id=m_song_id)) THEN -- if this fails it's in queue, so obviously it can't play	
-		IF EXISTS(SELECT(song_id) FROM playlist WHERE song_id=m_song_id) THEN -- Also only run is the song id is actually in the playlist
-			SELECT base_cooldown, cost_drop_day, base_cost, max_cost
-				INTO m_cooldown, m_cost_drop_day, m_base_cost, m_max_cost
-				FROM song_overrides WHERE song_id=m_song_id LIMIT 1;
-				
-			IF(ISNULL(m_cooldown)) THEN
-				SET m_cooldown = F_READ_NUM_PARAM('stdSongCooldown', 259200);
-				SET m_cost_drop_day = F_READ_NUM_PARAM('stdSongCostDropDay', 50);
-				SET m_base_cost = F_READ_NUM_PARAM('stdSongBaseCost', 150);
-				SET m_max_cost = F_READ_NUM_PARAM('stdSongMaxCost', 300);
-			END IF;
-			
-			SET m_last_play = F_GET_SONG_LAST_PLAY(m_song_id);
-						
-			
-			IF(TIMESTAMPDIFF(SECOND, m_last_play, UTC_TIMESTAMP()) < m_cooldown) THEN -- Still on cooldown
-				SET m_cost = -1;
-			ELSE -- Calculate it for real => cost = max - (days*cost/day); return max(cost, base_cost)
-				SET m_cost = m_max_cost - (TIMESTAMPDIFF(DAY, m_last_play, 
-					DATE_SUB(UTC_TIMESTAMP(), INTERVAL m_cooldown SECOND)) * m_cost_drop_day);
-			
-				-- Shift cost for this user. = max(0, normal_cost-user_discount)
-				SET m_user_discount = COALESCE((SELECT rupee_discount FROM viewers WHERE user_id = m_user_id), 0.0);
-				SET m_cost = GREATEST(0, (GREATEST(m_cost, m_base_cost)-m_user_discount));
-			END IF;
-		ELSE
-			SET m_cost = -3;
-		END IF;
-	ELSE	
-		SET m_cost = -2;
-	END IF;
-	
-	RETURN m_cost;
-END
-
-
-
-
-
-
 /* new cost/cooldown function
 * First, finds all of the songs aliased to this one, then for each it
 * checks for the proper override conditions, pulling the most specific set
@@ -122,11 +64,23 @@ BEGIN
 				FROM play_history WHERE @time_checked > UNIX_TIMESTAMP()-UNIX_TIMESTAMP(time_played));
 				
 		END LOOP l_calc_pts;
-	ELSE SET m_pts = -2; END IF;
+	ELSE SET m_pts = -3; END IF;
 END
 
 		
-			
+	
+DELIMITER $$
+
+DROP PROCEDURE IF EXISTS P_CALC_PTS_HELP$$
+CREATE PROCEDURE P_CALC_PTS_HELP
+(
+	IN m_song_id VARCHAR(255)
+)
+BEGIN
+	CALL P_CALC_PTS(m_song_id, @p);
+	UPDATE playlist SET song_points=@p WHERE song_id=m_song_id;
+END
+	
 	
 	
 -- Calculates how closely 2 songs match, in the form of an integer match level. Then applies a point cost to the match based on the match level
@@ -177,24 +131,154 @@ END
 -- internally fetches a song's points (or recalculates them) and converts to rupee cost / cooldown
 DELIMITER $$
 
-DROP PROCEDURE IF EXISTS P_CALC_COST
-CREATE PROCEDURE P_CALC_COST
+DROP FUNCTION IF EXISTS F_CALC_COST$$
+CREATE FUNCTION F_CALC_COST
 (
-	IN m_song_id VARCHAR(255),
-	IN m_user_id VARCHAR(30),
-	IN m_recalc_pts BOOLEAN,
-	OUT m_cost DOUBLE,
-	OUT m_pts DOUBLE
-)
+	m_song_id VARCHAR(255),
+	m_user_id VARCHAR(30),
+	m_in_queue_override BOOLEAN
+) RETURNS DOUBLE
+DETERMINISTIC
 BEGIN
-	IF m_recalc_pts THEN
-		CALL P_CALC_PTS(m_song_id, @pts);
-	ELSE
-		SET @pts = (SELECT song_points FROM playlist WHERE song_id=m_song_id LIMIT 1);
-	END IF;
-	SET m_pts = @pts;
+	DECLARE m_len_scl DOUBLE;
+	DECLARE m_pts_scl DOUBLE;
+	DECLARE m_cooldown_pts DOUBLE;
+	DECLARE m_base_cost DOUBLE;
+	DECLARE m_user_discount DOUBLE DEFAULT 0;
+	DECLARE m_cost DOUBLE DEFAULT -4;
+	DECLARE m_pts DOUBLE DEFAULT -7;
+	
+	SET m_len_scl =
+		(SELECT
+			l.scl
+		FROM song_length_cost_scl l
+			INNER JOIN playlist p ON l.lower_bound < p.song_length
+		WHERE p.song_id = m_song_id
+		ORDER BY l.lower_bound DESC
+		LIMIT 1);
+		
+	IF !ISNULL(m_len_scl) THEN -- will be null if the join fails, IE the song isn't found
+		IF(m_in_queue_override || NOT EXISTS(SELECT (1) FROM queue_main WHERE song_id=m_song_id)) THEN -- if this fails it's in queue, so it can't play. Override if desiried
+			IF COALESCE(!(SELECT is_blacklisted FROM viewers WHERE user_id = m_user_id), 1) THEN
+			
+				SET m_pts = (SELECT song_points FROM playlist WHERE song_id=m_song_id LIMIT 1);
+				
+				-- it *should* be impossible for this to fail given we already checked for song existence before, I can't shake the feeling that not checking again will bite me in the ass
+				IF m_pts >= 0 THEN
+					SET m_pts_scl = F_READ_NUM_PARAM('points_scl', 42);
+					SET m_cooldown_pts = F_READ_NUM_PARAM('cooldown_pts', 6);
+					SET m_base_cost = F_READ_NUM_PARAM('base_cost', 100);
+					SET m_user_discount = COALESCE((SELECT rupee_discount FROM viewers WHERE user_id = m_user_id), 0);
+					
+					-- make sure we aren't on cooldown before proceeding
+					IF m_pts < m_cooldown_pts THEN
+						SET m_cost = GREATEST(GREATEST(m_base_cost, ROUND(m_pts*m_pts_scl*m_len_scl*2,-2) / 2) - m_user_discount, 0); -- apply all the scalars, round to nearest 50, and don't let final cost dip below the base_cost. Then factor in for user discounts
+					
+					ELSE SET m_cost = -1; END IF; -- cooldown
+				ELSE SET m_cost = m_pts; END IF; -- something funky happened in the calc cost routine
+			
+			ELSE SET m_cost = -6; END IF; -- B A N N E D user
+		ELSE SET m_cost = -2; END IF; -- in queue, override off
+	ELSE SET m_cost = -3, m_pts = -3; END IF; -- bad song_id
+	
+	RETURN m_cost;
 END
 
+
+
+
+
+-- fetches songs in a format that is ready to be displayed for the front end. NOTE: m_user_id can be set to null/empty and be ignored
+DELIMITER $$
+
+DROP PROCEDURE IF EXISTS P_GET_SONGS_IN_OST$$
+CREATE PROCEDURE P_GET_SONGS_IN_OST
+(
+	IN m_ost VARCHAR(255),
+	IN m_user_id VARCHAR(30)
+)
+BEGIN
+	DECLARE m_oldest_check INTEGER;
+	SET m_oldest_check = UNIX_TIMESTAMP() - F_READ_NUM_PARAM('times_played_check', 2678400);
+	
+	SELECT
+		p.song_id AS song_id,
+		p.song_name AS song_name,
+		p.ost_name AS ost_name,
+		p.song_franchise AS franchise_name,
+		p.song_length AS song_length,
+		F_CALC_COST(p.song_id, m_user_id, 0)AS cost, -- TODO add proper handling of this
+		AVG(r.rating_pct) AS rating_pct,
+		COUNT(r.song_id) AS rating_num, 
+		MAX(h.time_played) AS last_play,
+		COUNT(h.time_played) AS times_played 		
+	FROM
+		playlist p 
+		LEFT JOIN play_history h ON
+			p.song_id=h.song_id AND
+			UNIX_TIMESTAMP(h.time_played) > m_oldest_check
+		LEFT JOIN ratings r ON
+			p.song_id=r.song_id
+	WHERE
+		p.ost_name = m_ost
+	GROUP BY p.song_id;
+END
+
+
+
+
+DELIMITER $$
+
+DROP VIEW IF EXISTS V_QUEUE_ENTRY$$
+CREATE VIEW V_QUEUE_ENTRY AS
+	SELECT 
+		v.username AS username,
+		v.rupees AS rupees,
+		v.favorite_song AS favorite_song,
+		v.is_blacklisted AS is_blacklisted,
+		v.is_admin AS is_admin,
+		v.rupee_discount AS rupee_discount,
+		v.free_requests AS free_requests,
+		v.login_bonus_count AS login_bonus_count,
+		v.static_rank AS static_rank,
+		v.watchtime_rank AS watchtime_rank,
+		v.birthday AS birthday,
+		v.last_birthday_withdraw AS last_birthday_withdraw,
+		v.song_on_hold AS song_on_hold,
+		v.note AS note,
+		
+		p.song_name AS song_name,
+		p.ost_name AS ost_name,
+		p.song_franchise AS song_franchise,
+		p.song_length AS song_length,
+		p.song_points AS song_points,
+		
+		AVG(r.rating_pct) AS rating_pct,
+		COUNT(r.song_id) AS rating_num,
+		
+		MAX(h.time_played) AS last_play,
+		COUNT(h.time_played) AS times_played,
+		
+		q.user_id AS user_id,
+		q.song_id AS song_id,
+		q.time_requested AS time_requested,
+		q.list_order AS list_order
+	FROM
+		queue_test q
+		LEFT JOIN play_history h ON
+			q.song_id=h.song_id AND
+			UNIX_TIMESTAMP(h.time_played) > F_READ_NUM_PARAM('times_played_check', 10000)
+
+		LEFT JOIN ratings r ON
+			q.song_id=r.song_id
+
+		INNER JOIN playlist p ON
+			p.song_id=q.song_id
+
+		INNER JOIN viewers v ON
+			v.user_id=q.user_id
+
+	GROUP BY q.song_id, q.id;
 
 
 
@@ -213,18 +297,18 @@ CREATE PROCEDURE P_BENCHMARK_PARAM_READ
 )
 BEGIN
 	DECLARE i INTEGER DEFAULT 0;
-	DECLARE m_start;
-	DECLARE m_end;
+	DECLARE m_start INTEGER;
+	DECLARE m_end INTEGER;
 	SET m_start = UNIX_TIMESTAMP();
 	
 	IF m_is_dbl THEN
 		WHILE i<m_num DO
-			F_READ_NUM_PARAM(m_key, 0);
+			SET @foonum := F_READ_NUM_PARAM(m_key, 0);
 			SET i=i+1;
 		END WHILE;
 	ELSE 
 		WHILE i<m_num DO
-			F_READ_STR_PARAM(m_key, "foo");
+			SET @foostr := F_READ_STR_PARAM(m_key, "foo");
 			SET i=i+1;
 		END WHILE;
 	END IF;
@@ -259,7 +343,7 @@ BEGIN
 	SET m_franchise_query = IF(m_franchise_query = '' OR m_franchise_query IS NULL, '%', CONCAT('%', m_franchise_query, '%'));	
 	SET m_olderthan = IF(m_olderthan IS NULL, UTC_TIMESTAMP(), m_olderthan);	
 	SET m_len_min = IF(m_len_min IS NULL, 0.0, m_len_min);
-	SET m_len_max = IF(m_len_max IS NULL, 9999999999999999999999999, m_len_max);
+	SET m_len_max = IF(m_len_max IS NULL, 420E69, m_len_max);
     
 	SELECT
 		`playlist`.`song_id` AS song_id,
@@ -313,41 +397,53 @@ CREATE PROCEDURE P_ADD_SONG
 BEGIN
 	DECLARE m_song_length DOUBLE;
 	
-	 SET m_cost = F_CALC_COST(m_song_id, m_user_id, m_queue_id != 'main');
-	
-	 IF (m_cost >= 0 && m_cost <= (SELECT rupees FROM viewers WHERE user_id=m_user_id)) THEN 
-		SET m_song_length = (SELECT song_length FROM playlist WHERE song_id=m_song_id LIMIT 1);
-		SET m_eta = (SELECT IF(is_playing!=0, len_total_remaining, -1) FROM queues WHERE queue_id = m_queue_id);
-		
-		-- Add the song to queue
-		SET @m_sql_ins = CONCAT ("INSERT INTO `queue_", m_queue_id,
-			"` (user_id, time_requested, song_id, list_order) 
-				VALUES(?, ?, ?, (SELECT COALESCE(MAX(list_order)+1, 1) FROM (SELECT * FROM queue_",m_queue_id,") AS foo))");
-		
-		SET @user_id = m_user_id;
-		SET @ts = UTC_TIMESTAMP();
-		SET @song_id = m_song_id;
-		
-		PREPARE stmt_ins FROM @m_sql_ins;
-		EXECUTE stmt_ins USING @user_id, @ts, @song_id;
-		DEALLOCATE PREPARE stmt_ins;
-		
-		
-		-- update the queues table
-		 SET @m_sql_update = CONCAT("UPDATE queues 
-			SET num_songs=num_songs+1, 
-			 len_total_remaining=len_total_remaining+", m_song_length,
-			" WHERE queue_id='", m_queue_id,"'");
-		
-		PREPARE stmt_update FROM @m_sql_update;
-		-- EXECUTE stmt_update;
-		DEALLOCATE PREPARE stmt_update;
-		
-		-- Charge the rupees
-		UPDATE viewers SET rupees=rupees-m_cost WHERE user_id=m_user_id;
-	-- ELSE -- user is too poor
-		-- SET m_cost = -5; 
-	END IF; 
+	SET m_cost = F_CALC_COST(m_song_id, m_user_id, m_queue_id != 'main');
+	SET m_eta = -1;
+	IF (m_cost >= 0 AND F_READ_NUM_PARAM("requests_open", 0) OR m_queue_id != 'main') THEN
+		IF (m_cost <= (SELECT rupees FROM viewers WHERE user_id=m_user_id)) THEN 
+			SET m_song_length = (SELECT song_length FROM playlist WHERE song_id=m_song_id LIMIT 1);
+			-- SET m_eta = (SELECT IF(is_playing!=0, len_total_remaining, -1) FROM queues WHERE queue_id = m_queue_id);
+			SET @m_sql_eta = CONCAT(
+			"SELECT
+				IF(F_READ_NUM_PARAM('is_now_playing', 0) != 0,
+					(F_READ_NUM_PARAM('now_playing_update', 0)
+					+ F_READ_NUM_PARAM('now_playing_length', 0)
+					+ SUM(p.song_length)),
+					-1) INTO @m_eta
+			FROM queue_",m_queue_id," q
+				INNER JOIN playlist p ON p.song_id = q.song_id"
+			);
+			
+			PREPARE stmt_eta FROM @m_sql_eta;
+			EXECUTE stmt_eta;
+			DEALLOCATE PREPARE stmt_eta;
+			
+			SET m_eta = @m_eta;
+			
+			-- Add the song to queue
+			SET @m_sql_ins = CONCAT ("INSERT INTO `queue_", m_queue_id,
+				"` (user_id, time_requested, song_id, list_order) 
+					VALUES(?, ?, ?, (SELECT COALESCE(MAX(list_order)+1, 1) FROM (SELECT * FROM queue_",m_queue_id,") AS foo))");
+			
+			SET @user_id = m_user_id;
+			SET @ts = UNIX_TIMESTAMP();
+			SET @song_id = m_song_id;
+			
+			PREPARE stmt_ins FROM @m_sql_ins;
+			EXECUTE stmt_ins USING @user_id, @ts, @song_id;
+			DEALLOCATE PREPARE stmt_ins;
+			
+			-- Charge the rupees
+			UPDATE viewers SET rupees=rupees-m_cost WHERE user_id=m_user_id;
+			
+			-- Post a queue update
+			INSERT INTO event_log(`time`, `data`, `type`, sender) VALUES(UNIX_TIMESTAMP(), m_queue_id, "QueueUpdatedEvent", "web_frontend");
+		ELSE -- user is too poor
+			SET m_cost = -5; 
+		END IF; 
+	ELSE
+		SET m_cost = -8;
+	END IF;
 END
 
 
@@ -362,14 +458,15 @@ DROP PROCEDURE IF EXISTS P_CREATE_QUEUE$$
 CREATE PROCEDURE P_CREATE_QUEUE
 (
 	IN m_queue_id VARCHAR(100),
-	IN m_delete_on_empty BOOLEAN
+	IN m_delete_on_empty BOOLEAN,
+	IN m_queue_name VARCHAR(255)
 )
 BEGIN
 	SET @m_sql = CONCAT
 	(
 	"CREATE TABLE `queue_", m_queue_id, "` (
 		`user_id` varchar(30) COLLATE utf8_unicode_ci NOT NULL,
-		`time_requested` datetime NOT NULL,
+		`time_requested` INTEGER NOT NULL,
 		`song_id` varchar(255) COLLATE utf8_unicode_ci NOT NULL,
 		`list_order` int(11) NOT NULL,
 		`id` int(11) NOT NULL AUTO_INCREMENT PRIMARY KEY
@@ -384,10 +481,12 @@ BEGIN
 	-- Add to queues record
 	INSERT INTO	queues (
 		queue_id,
-		delete_on_empty
+		delete_on_empty,
+		queue_name
 	) VALUES (
 		m_queue_id,
-		m_delete_on_empty
+		m_delete_on_empty,
+		m_queue_name
 	);
 END
 
@@ -416,6 +515,22 @@ END
 
 
 
+-- Registers an Event in the database
+DELIMITER $$
+
+DROP PROCEDURE IF EXISTS P_POST_EVENT$$
+CREATE PROCEDURE P_POST_EVENT
+(
+	IN m_type VARCHAR(255),
+	IN m_data TEXT,
+	IN m_sender VARCHAR(100)
+)
+BEGIN
+	INSERT INTO event_log ( `time`, `data`, `type`, `sender`, `description`)
+	VALUES (UNIX_TIMESTAMP(), m_data, m_type, m_sender, "");
+END
+
+
 
 
 -- pulls the next song from a queue. If the queue is empty afterwards, and is set to dededestroy
@@ -436,7 +551,7 @@ BEGIN
 	DEALLOCATE PREPARE stmt;
 	
 	IF(!ISNULL(@id)) THEN
-		-- get the next song
+		-- get the next song, load it as the active result set for the procedure
 		SET @m_sql_get = CONCAT(
 			"SELECT playlist.*, queue.user_id FROM PLAYLIST 
 			JOIN queue_",m_queue_id," AS queue ON 
@@ -632,12 +747,122 @@ DROP FUNCTION IF EXISTS F_SAME_SHIFT$$
 CREATE FUNCTION F_SAME_SHIFT(m_time1 DATETIME, m_time2 DATETIME, m_shift_len INTEGER) RETURNS BOOLEAN
 	DETERMINISTIC
 BEGIN
-	DECLARE m_sameShift BOOLEAN;
-	SET m_sameShift = (ABS(TIMESTAMPDIFF(SECOND, m_time1, m_time2)) % 86400) < m_shift_len;
-	RETURN (m_sameShift);
+	RETURN (ABS(TIMESTAMPDIFF(SECOND, m_time1, m_time2)) % 86400) < m_shift_len;
 END
 
 	
+
+
+
+
+DELIMITER $$
+
+DROP PROCEDURE IF EXISTS P_TEST_END_OF_THE_LINE$$
+CREATE PROCEDURE P_TEST_END_OF_THE_LINE
+(
+	IN m_limit INTEGER,
+	IN m_time_shift INTEGER
+)
+BEGIN
+	INSERT INTO ifttt_log
+		(
+			user_id,
+			command,
+			`time`,
+			response
+		)
+	SELECT
+		t.user_id,
+		IF(RAND()>0.666, "!left",
+				IF(RAND()>0.5, "!middle","!right"
+				)),
+		UNIX_TIMESTAMP() + m_time_shift,
+		CONCAT 
+		(
+			v.username,
+			", you chose something. Good for you! :dysOk:(",
+			t.user_id,
+			")"
+		)
+	FROM
+		TMP_MP_USER_POOL t
+	INNER JOIN
+		viewers v ON
+		v.user_id = t.user_id
+	LIMIT
+		m_limit;
+END
+
+
+
+
+
+
+DELIMITER $$
+
+DROP PROCEDURE IF EXISTS P_TEST_MERRY_GO_CHOMP$$
+CREATE PROCEDURE P_TEST_MERRY_GO_CHOMP
+(
+	IN m_limit INTEGER,
+	IN m_time_shift INTEGER
+)
+BEGIN
+	INSERT INTO ifttt_log
+		(
+			user_id,
+			command,
+			`time`,
+			response
+		)
+	SELECT
+		t.user_id,
+		IF(RAND()>0.666, "!left",
+				IF(RAND()>0.5, "!middle","!right"
+				)),
+		UNIX_TIMESTAMP() + m_time_shift,
+		CONCAT 
+		(
+			v.username,
+			", you chose something. Good for you! :dysOk:(",
+			t.user_id,
+			")"
+		)
+	FROM
+		TMP_MP_USER_POOL t
+	INNER JOIN
+		viewers v ON
+		v.user_id = t.user_id
+	LIMIT
+		m_limit;
+END
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

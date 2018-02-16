@@ -27,13 +27,13 @@
 			WHERE fire_emblem_minigame.is_nohr=0
 			ORDER BY hoshido DESC;"))->data;
 	
-	$tbl_html = '';
+	$tbl_inner = '';
 	for($i = 0; $i < max(count($nohrUsers), count($hosheidoUsers)); $i++) {
-		$tbl_html .= "<tr><td>";
-		$tbl_html .= $hosheidoUsers[$i]->hoshido;
-		$tbl_html .= "</td><td>";
-		$tbl_html .= $nohrUsers[$i]->nohr;
-		$tbl_html .= "</td></tr>\n";
+		$tbl_inner .= "<tr><td>";
+		$tbl_inner .= $hosheidoUsers[$i]->hoshido;
+		$tbl_inner .= "</td><td>";
+		$tbl_inner .= $nohrUsers[$i]->nohr;
+		$tbl_inner .= "</td></tr>\n";
 	}
 	
 	$winningTeam = ($counts->n < $counts->h ? "Hoshido" : "Nohr");
@@ -86,7 +86,7 @@ p {
 	<table width="100%" align="center">
 		<tbody>
 			<tr> <th>HOSHIDO</th> <th>NOHR</th> </tr>
-			<?php echo $GLOBALS['tbl_html']?>
+			<?php echo $GLOBALS['tbl_inner']?>
 		</tbody>
 	</table>
 </body>

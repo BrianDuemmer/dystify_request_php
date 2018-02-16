@@ -1,9 +1,3 @@
-<style>
-
-</style>
-
-<div>
-
 <?php	
 	require_once $_SERVER['DOCUMENT_ROOT'] . '/kkdystrack/php/viewer.php';
 	

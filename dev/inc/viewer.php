@@ -85,7 +85,10 @@
 					$impl->sessionID = $id;
 					$impl->pfpAddress = $pfpAddress;
 					
-				} else { // viewer exists, use that
+				} else { // viewer exists, use that. Just update stuff
+					$ps = db_prepareStatement("UPDATE viewers SET username=?, pfp_address=? WHERE user_id=?");
+					$ps->bind_param('sss', $username, $pfpAddress, $userID);
+					$ps->execute();
 					$impl = Viewer::withUID($userID);
 				}
 				

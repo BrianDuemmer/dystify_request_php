@@ -16,7 +16,7 @@
 	$client->setAccessType("offline");
 	
 	
-	if (!isset($_GET['code'])) { //they're not coming back from auth, so do he auth
+	if (!isset($_GET['code'])) { //they're not coming back from auth, so do the auth
 		$auth_url = $client->createAuthUrl();
 		header('Location: ' . filter_var($auth_url, FILTER_SANITIZE_URL)); 
 		
@@ -44,7 +44,7 @@
 		
 		
 		// go back to the main page
-		$redirect_uri = 'https://' . $_SERVER['HTTP_HOST'] . '/kkdystrack/php/login.php';
+		$redirect_uri = 'https://' . $_SERVER['HTTP_HOST'] . '/kkdystrack/php/request_page.php';
 		header('Location: ' . filter_var($redirect_uri, FILTER_SANITIZE_URL));
 		
 	}

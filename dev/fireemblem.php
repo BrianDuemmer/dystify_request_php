@@ -1,0 +1,297 @@
+<?php
+
+	require_once $_SERVER['DOCUMENT_ROOT'] . '/kkdystrack/php/dbUtil.php';
+
+	
+
+	$counts = json_decode(db_execRaw(
+
+			"SELECT COUNT(*) AS t, 
+
+			SUM(is_nohr) AS n, 
+
+			COUNT(8)-SUM(is_nohr) AS h 
+
+			FROM fire_emblem_minigame"))->data[0];
+
+	
+
+	$nohrUsers = json_decode(db_execRaw(
+
+			"SELECT 
+
+				viewers.username AS nohr 
+
+			FROM 
+
+				viewers 
+
+			JOIN fire_emblem_minigame ON 
+
+				fire_emblem_minigame.user_id = viewers.user_id 
+
+			WHERE fire_emblem_minigame.is_nohr=1
+			ORDER BY nohr ASC;"))->data; 
+
+	
+
+	$hosheidoUsers = json_decode(db_execRaw(
+
+			"SELECT
+
+				viewers.username AS hoshido
+
+			FROM
+
+				viewers
+
+			JOIN fire_emblem_minigame ON
+
+				fire_emblem_minigame.user_id = viewers.user_id
+
+			WHERE fire_emblem_minigame.is_nohr=0
+			ORDER BY hoshido ASC;"))->data;
+
+	
+
+	$tbl_inner = '';
+
+	for($i = 0; $i < max(count($nohrUsers), count($hosheidoUsers)); $i++) {
+
+		$tbl_inner .= "<tr><td>";
+
+		$tbl_inner .= $nohrUsers[$i]->nohr;
+
+		$tbl_inner .= "</td><td>";
+
+		$tbl_inner .= $hosheidoUsers[$i]->hoshido;
+
+		$tbl_inner .= "</td></tr>\n";
+
+	}
+
+	
+
+	$winningTeam = ($counts->n < $counts->h ? "Hoshido" : "Nohr");
+
+	$diff_user = abs($counts->n - $counts->h);
+
+	$diff_pct = $counts->t ? round(100 * $diff_user/$counts->t) : 0; 
+
+	$ppltxt = ($diff_user == 1 ? "person (so close!)" : "people");
+
+	
+
+//	if($diff_user != 0) {
+
+//		$disp_txt = "Type !join Hoshido or !join Nohr in YouTube chat to pick a side!";
+//		} 
+	$disp_txt = "Type !join Hoshido or !join Nohr in YouTube chat to pick a side!";
+
+?>
+
+
+<!DOCTYPE HTML>
+<html>
+<head>
+<meta charset="utf-8"/>
+<script>
+			(function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+  			(i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+			 m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+			  })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+			  ga('create', 'UA-75150259-1', 'auto');
+			  ga('send', 'pageview');
+		</script>
+
+		<div id="fb-root"></div>
+			<script>(function(d, s, id) {
+			  var js, fjs = d.getElementsByTagName(s)[0];
+			  if (d.getElementById(id)) return;
+			  js = d.createElement(s); js.id = id;
+			  js.src = "//connect.facebook.net/en_US/sdk.js#xfbml=1&version=v2.5";
+			  fjs.parentNode.insertBefore(js, fjs);
+			}(document, 'script', 'facebook-jssdk'));</script>
+<title>Fire Emblem Event</title>
+<link href="css/bootstrap.css" rel="stylesheet" type="text/css" media="all" />
+<!-- jQuery (necessary for Bootstrap's JavaScript plugins) -->
+<script src="js/jquery.min.js"></script>
+<!-- Custom Theme files -->
+<!--theme-style-->
+<link href="css/styleFE.css" rel="stylesheet" type="text/css" media="all" />	
+<!--//theme-style-->
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="keywords" content="Dystify Homepage" />
+<script type="application/x-javascript"> addEventListener("load", function() { setTimeout(hideURLbar, 0); }, false); function hideURLbar(){ window.scrollTo(0,1); } </script>
+<!--flexslider-->
+<link rel="stylesheet" href="css/flexslider.css" type="text/css" media="screen" />
+<!--//flexslider-->
+<script src="js/easyResponsiveTabs.js" type="text/javascript"></script>
+		    <script type="text/javascript">
+			    $(document).ready(function () {
+			        $('#horizontalTab').easyResponsiveTabs({
+			            type: 'default', //Types: default, vertical, accordion            
+			            width: 'auto', //auto or any width like 600px
+			            fit: true   // 100% fit in a container
+			        });
+			    });
+				
+</script>
+<script src="js/modernizr.custom.97074.js"></script>
+<script type="text/javascript" src="js/jquery.hoverdir.js"></script>	
+		<script type="text/javascript">
+			$(function() {
+			
+				$(' #da-thumbs > li ').each( function() { $(this).hoverdir(); } );
+
+			});
+		</script>
+<!--flexslider-->
+<link rel="stylesheet" href="css/flexslider.css" type="text/css" media="screen" />
+<!--//flexslider-->
+<script src="js/jquery.chocolat.js"></script>
+		<link rel="stylesheet" href="css/chocolat.css" type="text/css" media="screen" charset="utf-8">
+		<!--light-box-files -->
+
+
+</head>
+<body> 
+<!--header-->	
+<div class="header" >
+	<div class="header-top">
+		<div class="container">
+			<div class="head-top">
+				<div class="logo">
+					<h1><a href="index.html"><span>D</span>ystify</a></h1>
+				</div>
+			<div class="top-nav">		
+			  <span class="menu"><img src="images/menu.png" alt=""> </span>
+					<ul>
+						<li><a  href="index"  >Home</a></li>
+						<li><a  href="playlist"  >Playlist</a></li>
+						<li><a  href="songlist"  >Song List</a></li>
+						<li><a  href="streamfaq"  >FAQ</a></li>
+						<li><a  href="https://youtube.com/c/Dystifyzer/live" target="_blank" >Live Stream</a></li>
+						<li><a  href="https://discord.gg/a7S92js" target="_blank">Discord</a></li>
+						<li><a  href="https://twitter.com/Dystify" target="_blank">Twitter</a></li>
+						<div class="clearfix"> </div>
+					</ul>
+
+					<!--script-->
+				<script>
+					$("span.menu").click(function(){
+						$(".top-nav ul").slideToggle(500, function(){
+						});
+					});
+			</script>
+
+				</div>
+				
+				<div class="clearfix"> </div>
+		</div>
+		</div>
+	</div>
+</div>
+<!--banner-->
+<div class="banner">
+	<div class="container">
+		<h2>.</h2>
+		 <div class="banner-matter">
+           	 <div class="slider">
+                 
+			  <script>window.jQuery || document.write('<script src="js/libs/jquery-1.7.min.js">\x3C/script>')</script>
+			  <!--FlexSlider-->
+			  <script defer src="js/jquery.flexslider.js"></script>
+			  <script type="text/javascript">
+			    $(function(){
+			      SyntaxHighlighter.all();
+			    });
+			    $(window).load(function(){
+			      $('.flexslider').flexslider({
+			        animation: "slide",
+			        start: function(slider){
+			          $('body').removeClass('loading');
+			        }
+			      });
+			    });
+			  </script>
+
+			 </div>
+		</div>	
+	</div>
+<!--title-->
+</div>
+<!--games-->
+<div class="container">
+		<div class="games">
+		<h3>Fire Emblem Event</h3>
+			<section>
+				<ul id="da-thumbs" class="da-thumbs">
+<p style ="text-align: center;">Our Fire Emblem Warriors launch event will take place on Saturday, October 21 at 1 PM PDT (PST), 4 PM EDT (EST), 8 PM UTC, 9 PM BST, 10 PM CEST, 4 AM JST, 6 AM AEST!</p><br>
+	<p style ="text-align: center;">During the event there will be a competition between the two rival kingdoms, Hoshido and Nohr. We will have different minigames to earn points as well as a final duel at the end of the event. Lead your team to victory by signing up now!</p>
+<br>
+<p style="text-align: center;"><b>Type !join Hoshido or !join Nohr in YouTube chat to pick a side!</b></p>
+<br>          
+<div class="bannerh2"><p style="text-align: center;"><img src="/images/FE.jpg" alt="Fire Emblem Fates Teams" style="width:60%"></p></div> <!--"width:700px;height:394px;"-->
+	<div class="table"><table width="60%" align="center">
+		<tbody>
+			<tr> <th>NOHR</th> <th>HOSHIDO</th> </tr>
+
+			<?php echo $GLOBALS['tbl_inner']?>
+
+		</tbody>
+
+	</table></ul></div>
+<div class="clearfix"> </div>
+				</ul>
+			</section>
+			
+
+	</div>
+</div>
+</div>
+<!--footer-->
+	<div class="footer">
+		<div class="container">
+			<div class="footer-top">
+				<div class="col-md-4  top-footer">
+					<ul>
+						<li><a href="https://twitter.com/Dystify" target="_blank"><i></i></a></li>
+						<li><a href="https://twitter.com/Dystify" target="_blank">Twitter</a></li>
+					</ul>
+				</div>
+				<div class="col-md-4 top-footer">
+					<ul>
+						<li><a href="https://www.youtube.com/channel/UC8CDnZ97yyp9k88dxZkApeQ?sub_confirmation=1" target="_blank"><i class="youtube"></i></a></li>
+						<li><a href="https://www.youtube.com/channel/UC8CDnZ97yyp9k88dxZkApeQ?sub_confirmation=1" target="_blank">Youtube</a></li>
+					</ul>
+				</div>
+				<div class="col-md-4 top-footer">
+					<ul>
+						<li><a href="https://youtube.streamlabs.com/dystifyzer" target="_blank"><i class="facebook"></i></a></li>
+						<li><a href="https://youtube.streamlabs.com/dystifyzer" target="_blank">Support&nbsp;Me</a></li>
+						</ul>
+				</div>
+				<div class="clearfix"></div>
+			</div>
+			<ul class="footer-grid">
+					<li><a  href="index"  >Home</a></li>
+						<li><a  href="playlist"  >Playlist</a></li>
+						<li><a  href="#"  >Song List</a></li>
+						<li><a  href="streamfaq"  >FAQ</a></li>
+						<li><a  href="https://youtube.com/c/Dystifyzer/live" target="_blank"  >Live Stream</a></li>
+						<li><a  href="https://discord.gg/a7S92js" target="_blank" >Discord</a></li>
+						<li><a  href="https://twitter.com/Dystify" target="_blank">Twitter</a></li>
+					</ul>
+					<p> © Dystify. All rights reserved.</p>
+		</div>
+	</div>
+
+</body>
+
+</html>
+
+
+
